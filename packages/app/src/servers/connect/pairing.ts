@@ -1,7 +1,8 @@
-import { isUnauthorizedError, OpenCode } from "@opencode/client/promise"
+import { isUnauthorizedError } from "@opencode/client/promise"
 import { Option, Schema } from "effect"
+import { createApiForServer } from "@/runtime/server/api"
 import { checkServerHealth } from "@/runtime/server/health"
-import { normalizeServerUrl } from "@/runtime/server/registry"
+import { normalizeServerUrl, type ServerConnection } from "@/runtime/server/registry"
 
 export function serverAddress(value: string) {
   if (value.includes("://") && !/^https?:\/\//.test(value.trim())) return
@@ -74,7 +75,11 @@ export function legacyPairingLink(value: string) {
   return url.pathname === "/connect" && (url.hash.length > 1 || url.searchParams.has("data"))
 }
 
-export type Pairing = { readonly url: string; readonly password: string }
+export type Pairing = {
+  readonly url: string
+  readonly password: string
+  readonly headers?: ServerConnection.HttpBase["headers"]
+}
 
 export type Redeemed =
   | { readonly type: "paired"; readonly pairing: Pairing }
@@ -82,11 +87,14 @@ export type Redeemed =
   | { readonly type: "unreachable" }
 
 // Every address may reach the same server, but the code is single-use, so at most one attempt succeeds.
-export function redeemPairingLink(link: { urls: ReadonlyArray<string>; code: string }) {
+export function redeemPairingLink(
+  link: { urls: ReadonlyArray<string>; code: string },
+  headers?: ServerConnection.HttpBase["headers"],
+) {
   const attempts = link.urls.map((url) =>
-    OpenCode.make({ baseUrl: url })
+    createApiForServer({ server: { url, headers } })
       .server.connect({ code: link.code }, { signal: AbortSignal.timeout(5_000) })
-      .then((session): Pairing => ({ url, password: session.token })),
+      .then((session): Pairing => ({ url, password: session.token, ...(headers ? { headers } : {}) })),
   )
 
   // Whether the first address answered at all: a 401 there means another address spent the code first.
@@ -125,7 +133,7 @@ async function preferFirst(
   ])
 
   if (!reachable) return pairing
-  const http = { url: first, password: pairing.password }
+  const http = { ...pairing, url: first }
   const health = await checkServerHealth(http, globalThis.fetch, { signal: AbortSignal.timeout(5_000), retryCount: 0 })
 
   return health.healthy ? http : pairing

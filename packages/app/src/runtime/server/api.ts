@@ -19,6 +19,19 @@ export function authFromToken(token: string | null) {
   }
 }
 
+export function serverHeaders(server: ServerConnection.HttpBase): Record<string, string> | undefined {
+  const headers = Object.fromEntries([
+    ...(server.password ? [["authorization", `Basic ${authTokenFromCredentials({ password: server.password })}`]] : []),
+    ...Object.entries(server.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+  ])
+
+  return Object.keys(headers).length ? headers : undefined
+}
+
+export function serverConnectionIdentity(server: ServerConnection.HttpBase) {
+  return JSON.stringify([server.url, server.password ?? "", Object.entries(serverHeaders(server) ?? {}).sort()])
+}
+
 export function createApiForServer(input: {
   server: ServerConnection.HttpBase
   fetch?: typeof globalThis.fetch
@@ -26,13 +39,7 @@ export function createApiForServer(input: {
   return OpenCode.make({
     baseUrl: input.server.url,
     fetch: input.fetch,
-    headers: input.server.password
-      ? {
-          Authorization: `Basic ${authTokenFromCredentials({
-            password: input.server.password,
-          })}`,
-        }
-      : undefined,
+    headers: serverHeaders(input.server),
   })
 }
 

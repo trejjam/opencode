@@ -6,6 +6,7 @@ export const ServerKey = Schema.String.pipe(Schema.brand("ServerConnection.Key")
 export const ServerHttpBase = Persistence.struct({
   url: Schema.String,
   password: Schema.optional(Schema.String),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.mutableKey(Schema.String))),
 })
 
 export const ServerHttp = Persistence.struct({

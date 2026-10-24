@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { bareServerAddress, legacyPairingLink, pairingLink } from "./pairing"
+import { once } from "node:events"
+import { createServer } from "node:http"
+import { bareServerAddress, legacyPairingLink, pairingLink, redeemPairingLink } from "./pairing"
 
 describe("pairing link", () => {
   test("reads the server address and code from opencode pair links", () => {
@@ -54,4 +56,95 @@ describe("pairing link", () => {
     expect(legacyPairingLink("http://192.168.1.2:49374/connect")).toBe(false)
     expect(legacyPairingLink("http://192.168.1.2:49374/auth/connect/abc")).toBe(false)
   })
+
+  test.each([undefined, { "CF-Access-Client-Id": "client", "CF-Access-Client-Secret": "access" }])(
+    "redeems with custom headers and preserves them when preferring the first reachable address (%p)",
+    async (headers) => {
+      const requests: Array<{
+        address: string
+        path: string
+        authorization: string | null
+        client: string | null
+        secret: string | null
+      }> = []
+      const servers = ["first", "second"].map((address) =>
+        createServer((request, response) => {
+          response.setHeader("access-control-allow-origin", "*")
+          response.setHeader("access-control-allow-headers", "*")
+          response.setHeader("access-control-allow-methods", "GET, OPTIONS")
+
+          if (request.method === "OPTIONS") {
+            response.writeHead(204)
+            response.end()
+
+            return
+          }
+
+          requests.push({
+            address,
+            path: request.url ?? "",
+            authorization: request.headers.authorization ?? null,
+            client: String(request.headers["cf-access-client-id"] ?? "") || null,
+            secret: String(request.headers["cf-access-client-secret"] ?? "") || null,
+          })
+          response.setHeader("content-type", "application/json")
+
+          if (address === "second") {
+            response.end(JSON.stringify({ token: "paired-token" }))
+
+            return
+          }
+
+          if (request.url?.startsWith("/auth/connect/")) {
+            response.writeHead(401)
+            response.end(JSON.stringify({ _tag: "UnauthorizedError", message: "Code already redeemed" }))
+
+            return
+          }
+
+          response.end(JSON.stringify({ version: "2.0.0", pid: 1, urls: [], paths: { tmp: "/tmp/opencode" } }))
+        }).listen(0, "127.0.0.1"),
+      )
+
+      try {
+        await Promise.all(servers.map((server) => once(server, "listening")))
+        const urls = servers.map((server) => {
+          const address = server.address()
+
+          if (!address || typeof address === "string") throw new Error("Pairing server did not bind a port")
+
+          return `http://127.0.0.1:${address.port}`
+        })
+
+        expect(await redeemPairingLink({ urls, code: "pair-code" }, headers)).toEqual({
+          type: "paired",
+          pairing: { url: urls[0], password: "paired-token", ...(headers ? { headers } : {}) },
+        })
+        expect(
+          requests
+            .filter((request) => request.path.startsWith("/auth/connect/"))
+            .sort((a, b) => a.address.localeCompare(b.address)),
+        ).toEqual(
+          ["first", "second"].map((address) => ({
+            address,
+            path: "/auth/connect/pair-code",
+            authorization: null,
+            client: headers ? "client" : null,
+            secret: headers ? "access" : null,
+          })),
+        )
+        expect(requests.filter((request) => request.path === "/api/info")).toEqual([
+          {
+            address: "first",
+            path: "/api/info",
+            authorization: `Basic ${btoa("opencode:paired-token")}`,
+            client: headers ? "client" : null,
+            secret: headers ? "access" : null,
+          },
+        ])
+      } finally {
+        await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
+      }
+    },
+  )
 })

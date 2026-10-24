@@ -10,7 +10,7 @@ function serverSchema(canonical?: () => string | undefined) {
 }
 
 describe("server persistence schema", () => {
-  test("migrates legacy auth and writes only current server objects", () => {
+  test("migrates legacy auth and roundtrips current server objects with custom headers", () => {
     const schema = serverSchema()
 
     const input = {
@@ -22,7 +22,12 @@ describe("server persistence schema", () => {
           displayName: "Remote",
           label: "Production",
           authToken: true,
-          http: { url: "https://nested.example", username: "legacy", password: "second" },
+          http: {
+            url: "https://nested.example",
+            username: "legacy",
+            password: "second",
+            headers: { "CF-Access-Client-Id": "client", "CF-Access-Client-Secret": "access", Authorization: "Bearer token" },
+          },
         },
       ],
       projects: { local: [{ worktree: "/project", expanded: true }] },
@@ -38,7 +43,11 @@ describe("server persistence schema", () => {
           displayName: "Remote",
           label: "Production",
           authToken: true,
-          http: { url: "https://nested.example", password: "second" },
+          http: {
+            url: "https://nested.example",
+            password: "second",
+            headers: { "CF-Access-Client-Id": "client", "CF-Access-Client-Secret": "access", Authorization: "Bearer token" },
+          },
         },
       ],
       hidden: {},

@@ -2,7 +2,7 @@ import type { OpenCodeEvent } from "@opencode/client/promise"
 import { createClientConnection, createPtyClient, type ClientConnectionStatus } from "@opencode/client/solid"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { type Accessor, createEffect, on, onCleanup } from "solid-js"
-import { createApiForServer, type ServerApi } from "@/runtime/server/api"
+import { createApiForServer, serverConnectionIdentity, type ServerApi } from "@/runtime/server/api"
 import { usePlatform } from "@/runtime/platform/platform"
 import { ServerConnection } from "./registry"
 import { createRefCountMap } from "@/runtime/server/refcount"
@@ -79,7 +79,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   if (server.type === "extension") {
     createEffect(
       on(
-        () => `${server.http.url}\0${server.http.password ?? ""}`,
+        () => serverConnectionIdentity(server.http),
         () => transport.update(server.http),
         { defer: true },
       ),

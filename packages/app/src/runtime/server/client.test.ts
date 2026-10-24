@@ -86,12 +86,25 @@ describe("server event stream", () => {
   })
 })
 
-test("rotates HTTP and PTY clients together", async () => {
-  const requests: Array<{ url: string; authorization: string | null }> = []
+test("rotates HTTP, SSE and PTY ticket headers together, including header-only edits", async () => {
+  const requests: Array<{ url: string; authorization: string | null; client: string | null }> = []
 
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init)
-    requests.push({ url: request.url, authorization: request.headers.get("authorization") })
+    requests.push({
+      url: request.url,
+      authorization: request.headers.get("authorization"),
+      client: request.headers.get("cf-access-client-id"),
+    })
+
+    if (new URL(request.url).pathname === "/api/event")
+      return new Response('data: {"type":"server.connected","data":{}}\n\n', {
+        headers: { "content-type": "text/event-stream" },
+      })
+
+    // Stop at the HTTP ticket boundary: a browser WebSocket cannot send these custom headers.
+    if (new URL(request.url).pathname.endsWith("/connect-token"))
+      return Response.json({ _tag: "UnauthorizedError", message: "Authentication required" }, { status: 401 })
 
     return Response.json({
       version: "2.0.0-test",
@@ -113,6 +126,7 @@ test("rotates HTTP and PTY clients together", async () => {
   const replacement = transport.update({
     url: "http://127.0.0.1:4200",
     password: "second",
+    headers: { "CF-Access-Client-Id": "first-client" },
   })
 
   await transport.api.server.info()
@@ -124,10 +138,38 @@ test("rotates HTTP and PTY clients together", async () => {
     {
       url: "http://127.0.0.1:4100/api/info",
       authorization: `Basic ${btoa("opencode:first")}`,
+      client: null,
     },
     {
       url: "http://127.0.0.1:4200/api/info",
       authorization: `Basic ${btoa("opencode:second")}`,
+      client: "first-client",
     },
   ])
+
+  const previousPty = transport.pty
+  const previousApi = transport.api
+  transport.update({
+    url: "http://127.0.0.1:4200",
+    password: "second",
+    headers: { "cf-access-client-id": "updated-client", aUtHoRiZaTiOn: "Bearer custom" },
+  })
+
+  expect(transport.api).not.toBe(previousApi)
+  expect(transport.pty).not.toBe(previousPty)
+  requests.length = 0
+
+  await transport.api.server.info()
+  const events: OpenCodeEvent[] = []
+  for await (const event of transport.api.event.subscribe()) events.push(event)
+  expect(events).toEqual([{ type: "server.connected", data: {} }])
+  await expect(transport.pty.connect({ ptyID: "pty_1" })).rejects.toThrow()
+
+  expect(requests).toEqual(
+    ["/api/info", "/api/event", "/api/pty/pty_1/connect-token"].map((path) => ({
+      url: `http://127.0.0.1:4200${path}`,
+      authorization: "Bearer custom",
+      client: "updated-client",
+    })),
+  )
 })

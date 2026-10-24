@@ -18,20 +18,31 @@ function abortFromInput(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 describe("checkServerHealth", () => {
-  test.each([undefined, "secret"])("reads /api/info authenticating with only the password (%s)", async (password) => {
-    const requests: { path: string; authorization: string | null }[] = []
+  test.each([
+    { http: {}, authorization: null, client: null },
+    { http: { password: "secret" }, authorization: `Basic ${btoa("opencode:secret")}`, client: null },
+    {
+      http: { password: "secret", headers: { "CF-Access-Client-Id": "client", aUtHoRiZaTiOn: "Bearer custom" } },
+      authorization: "Bearer custom",
+      client: "client",
+    },
+  ])("reads /api/info with effective server headers (%p)", async ({ http, authorization, client }) => {
+    const requests: { path: string; authorization: string | null; client: string | null }[] = []
 
     const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(input instanceof Request ? input.url : input)
-      requests.push({ path: url.pathname, authorization: new Headers(init?.headers).get("authorization") })
+      const headers = new Headers(init?.headers)
+      requests.push({
+        path: url.pathname,
+        authorization: headers.get("authorization"),
+        client: headers.get("cf-access-client-id"),
+      })
 
       return info("2.0.0")
     }) as typeof globalThis.fetch
 
-    expect(await checkServerHealth({ ...server, password }, fetch)).toEqual({ healthy: true, version: "2.0.0" })
-    expect(requests).toEqual([
-      { path: "/api/info", authorization: password ? `Basic ${btoa(`opencode:${password}`)}` : null },
-    ])
+    expect(await checkServerHealth({ ...server, ...http }, fetch)).toEqual({ healthy: true, version: "2.0.0" })
+    expect(requests).toEqual([{ path: "/api/info", authorization, client }])
   })
 
   test("reports rejected credentials without retrying", async () => {

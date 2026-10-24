@@ -1,6 +1,6 @@
 import { usePlatform } from "@/runtime/platform/platform"
 import { ServerConnection } from "@/runtime/server/registry"
-import { authTokenFromCredentials } from "./api"
+import { serverConnectionIdentity, serverHeaders } from "./api"
 import { ClientError, isUnauthorizedError, OpenCode } from "@opencode/client"
 import { Accessor, createEffect, onCleanup } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
@@ -32,10 +32,6 @@ const healthCache = new Map<
   string,
   { at: number; done: boolean; fetch: typeof globalThis.fetch; promise: Promise<ServerHealth> }
 >()
-
-function cacheKey(server: ServerConnection.HttpBase) {
-  return `${server.url}\n${server.password ?? ""}`
-}
 
 function timeoutSignal(timeoutMs: number) {
   const timeout = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal }).timeout
@@ -101,11 +97,7 @@ export async function checkServerHealth(
   const retryCount = opts?.retryCount ?? defaultRetryCount
   const retryDelayMs = opts?.retryDelayMs ?? defaultRetryDelayMs
 
-  const headers = server.password
-    ? {
-        Authorization: `Basic ${authTokenFromCredentials({ password: server.password })}`,
-      }
-    : undefined
+  const headers = serverHeaders(server)
 
   const next = (count: number, error: unknown) => {
     if (count >= retryCount || !retryable(error, signal)) return Promise.resolve({ healthy: false } as const)
@@ -144,7 +136,7 @@ export function useCheckServerHealth() {
   const fetcher = platform.fetch ?? globalThis.fetch
 
   return (http: ServerConnection.HttpBase) => {
-    const key = cacheKey(http)
+    const key = serverConnectionIdentity(http)
     const hit = healthCache.get(key)
     const now = Date.now()
 
@@ -209,7 +201,7 @@ export function createServerHealth(
         continue
       }
 
-      const endpoint = cacheKey(conn.http)
+      const endpoint = serverConnectionIdentity(conn.http)
 
       if (conn.managed && endpoints.get(conn.key) !== endpoint) {
         setStatus(conn.key, reconcile({ healthy: false, checking: true }))

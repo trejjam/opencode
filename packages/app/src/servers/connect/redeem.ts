@@ -1,5 +1,6 @@
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
+import type { ServerConnection } from "@/runtime/server/registry"
 import { isMixedContent } from "./browser"
 import { legacyPairingLink, pairingLink, redeemPairingLink, type Pairing } from "./pairing"
 
@@ -14,7 +15,7 @@ type Redeemed = { code?: string; pairing?: Pairing }
 // Pasted and scanned links share one redeem path so every surface explains a failure the same way.
 // Each form keeps the last token it redeemed: the code is spent, so a retry after a failed connection check reuses it,
 // whichever form the link takes (a scanned QR payload, or the link the scanner then shows).
-export function useRedeemPairing(): RedeemPairing {
+export function useRedeemPairing(headers?: () => ServerConnection.HttpBase["headers"]): RedeemPairing {
   const language = useLanguage()
   const platform = usePlatform()
   const last: Redeemed = {}
@@ -29,10 +30,10 @@ export function useRedeemPairing(): RedeemPairing {
     if (last.pairing && last.code === link.code) {
       const url = link.urls.includes(last.pairing.url) ? last.pairing.url : (link.urls[0] ?? last.pairing.url)
 
-      return { pairing: { url, password: last.pairing.password } }
+      return { pairing: { ...last.pairing, url, ...(headers ? { headers: headers() } : {}) } }
     }
 
-    const result = await redeemPairingLink(link)
+    const result = await redeemPairingLink(link, headers?.())
 
     if (result.type === "paired") {
       last.code = link.code

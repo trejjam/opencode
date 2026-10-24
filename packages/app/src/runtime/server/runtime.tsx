@@ -22,6 +22,7 @@ import { useSettings } from "@/settings/model"
 import { timelinePreset } from "@opencode/session-ui/timeline/detail"
 import type { SessionInfo } from "@opencode/client/promise"
 import { resolveProjectForSession, resolveSessionDetailsProject } from "@/shell/layout/helpers"
+import { serverConnectionIdentity } from "./api"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -39,7 +40,7 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
     const serverCtxs = new Map<ServerConnection.Key, ReturnType<typeof createServerController>>()
     const serverCtxDisposers = new Map<ServerConnection.Key, () => void>()
     // The credentials each controller started with, as plain values: the listed connection is a store proxy that
-    // already reads the new password once the user saves it.
+    // already reads the new password and headers once the user saves them.
     const serverCtxCredentials = new Map<ServerConnection.Key, string>()
 
     const owner = getOwner()
@@ -307,5 +308,5 @@ function isLocalHost(url: string) {
 
 /** What an HTTP server's controller authenticates with; other servers keep one controller per id. */
 function credentials(conn: ServerConnection.Any) {
-  return conn.type === "http" ? `${conn.http.url}\n${conn.http.password ?? ""}` : ""
+  return conn.type === "http" ? serverConnectionIdentity(conn.http) : ""
 }
