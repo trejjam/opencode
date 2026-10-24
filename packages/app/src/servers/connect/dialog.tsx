@@ -27,12 +27,14 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { normalizeServerUrl, ServerConnection, useServers } from "@/runtime/server/registry"
 import { useTabs } from "@/shell/tabs/tabs"
 import { useCheckServerHealth } from "@/runtime/server/health"
+import { serverConnectionIdentity } from "@/runtime/server/api"
 import { usePlatform } from "@/runtime/platform/platform"
 import { isMixedContent } from "./browser"
 import { cameraHint, createCameraAvailability } from "./camera"
 import { bareServerAddress, pairingLink, type Pairing } from "./pairing"
 import { useRedeemPairing } from "./redeem"
 import { ConnectMethodSwitch, type ConnectMethod } from "./method"
+import { createServerHeaderEditor, ServerHeaderEditor } from "./headers"
 import "@/settings/settings.css"
 
 const PairingScanner = lazy(() => import("./scanner").then((module) => ({ default: module.PairingScanner })))
@@ -103,7 +105,7 @@ export const DialogServer: Component<{
   }
 
   return (
-    <Dialog fit class="settings-server-dialog">
+    <Dialog fit class="settings-server-dialog" containerClass="settings-server-dialog-container">
       <DialogHeader hideClose={true}>
         <DialogTitle>{title()}</DialogTitle>
       </DialogHeader>
@@ -218,6 +220,7 @@ export const DialogServer: Component<{
                 </span>
               </div>
             </Show>
+            <ServerHeaderEditor editor={form.headers} disabled={form.state.busy()} onKeyDown={keyDown} />
             <Show when={form.state.method() === "link" && platform.platform === "web"}>
               <Show
                 when={camera.available.latest || camera.available.loading}
@@ -263,7 +266,6 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
   const global = useGlobal()
   const language = useLanguage()
   const checkServerHealth = useCheckServerHealth()
-  const redeem = useRedeemPairing()
   const healthPreview = createServerHealthPreview(checkServerHealth)
 
   const [store, setStore] = createStore<{
@@ -286,10 +288,20 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
     status: undefined,
   })
 
+  const headers = createServerHeaderEditor({
+    onChange: () => {
+      setStore("error", "")
+      preview()
+    },
+  })
+
+  const redeem = useRedeemPairing(() => headers.result().headers)
+
   onCleanup(healthPreview.cancel)
 
   const reset = () => {
     healthPreview.cancel()
+    headers.reset()
     setStore({
       mode: "list",
       method: "link",
@@ -325,7 +337,7 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
     const original = store.mode === "edit" ? editing() : undefined
 
     if (!original || original.http.url === pairing.url) return pairing
-    const http = { url: original.http.url, password: pairing.password }
+    const http = { ...pairing, url: original.http.url }
 
     return (await checkServerHealth(http)).healthy ? http : pairing
   }
@@ -361,7 +373,7 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
 
     if (!url) return void reset()
 
-    return { url, password: store.values.password || undefined }
+    return { url, password: store.values.password || undefined, headers: headers.result().headers }
   }
 
   const request = useMutation(() => ({
@@ -381,9 +393,8 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
       if (
         original?.type === "http" &&
         !global.servers.health[ServerConnection.key(original)]?.unauthorized &&
-        normalized === original.http.url &&
         name === original.displayName &&
-        password === original.http.password
+        serverConnectionIdentity(http) === serverConnectionIdentity(original.http)
       ) {
         reset()
 
@@ -396,6 +407,7 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
         http: {
           url: normalized,
           password,
+          headers: http.headers,
         },
       }
 
@@ -432,17 +444,19 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
 
   const preview = () => {
     // A pairing link is not a server address until it is redeemed, and redeeming spends it.
-    if (store.method === "link" || pairingLink(store.values.url)) {
+    if (store.method === "link" || pairingLink(store.values.url) || headers.result().invalid) {
       healthPreview.cancel()
       setStore("status", undefined)
 
       return
     }
 
-    void healthPreview.preview(store.values, (status) => setStore("status", status))
+    void healthPreview.preview({ ...store.values, headers: headers.result().headers }, (status) =>
+      setStore("status", status),
+    )
   }
 
-  const change = (field: keyof ServerFormValues, value: string) => {
+  const change = (field: "url" | "name" | "password", value: string) => {
     if (request.isPending) return
     setStore("values", field, value)
     setStore("error", "")
@@ -457,6 +471,7 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
 
   const startEdit = (connection: ServerConnection.Http) => {
     reset()
+    headers.reset(connection.http.headers)
     setStore({
       mode: "edit",
       // A signed-out server needs a new pairing link; otherwise editing starts from its address.
@@ -475,6 +490,8 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
   const submit = () => {
     if (store.mode === "list" || request.isPending) return
     setStore("error", "")
+
+    if (!headers.validate()) return
     request.mutate()
   }
 
@@ -492,6 +509,7 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
   })
 
   return {
+    headers,
     state: {
       mode: () => store.mode,
       open: () => store.mode !== "list",
@@ -526,7 +544,10 @@ function createFormController(options: { onSelect?: (server: ServerConnection.Ht
       password: (value: string) => change("password", value),
     },
     scan: {
-      start: () => setStore("scanning", true),
+      start: () => {
+        if (!headers.validate()) return
+        setStore("scanning", true)
+      },
       stop: () => setStore("scanning", false),
       complete: pair,
       redeem,

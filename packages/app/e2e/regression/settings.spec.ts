@@ -1265,7 +1265,7 @@ test("the add server dialog keeps focus above fullscreen settings", async ({ pag
   await expect(settings).toBeVisible()
 })
 
-test("the add server dialog pairs from a one-time link and explains a spent one", async ({ page }) => {
+test("server headers validate before pairing, persist, edit, and clear", async ({ page }) => {
   const paired = "http://127.0.0.1:4098"
   await mockRemoteServer(page, { directory: "/remote/settings-demo" })
   await mockOpenCodeServer(page, {
@@ -1280,26 +1280,162 @@ test("the add server dialog pairs from a one-time link and explains a spent one"
   })
   const { settings } = await open(page)
   const link = `${paired}/auth/connect/one-time-code`
+  const redemptions: string[] = []
+  page.on("request", (request) => {
+    if (request.url() === link) redemptions.push(request.url())
+  })
 
   const addServer = async () => {
     await settings.locator('[data-component="settings-nav-group-header"]').filter({ hasText: "Servers" }).hover()
     await settings.getByRole("button", { name: "Add server" }).click()
     const editor = page.getByRole("dialog", { name: "Add server" })
     await editor.getByLabel("Pairing link", { exact: true }).fill(link)
-    await editor.getByRole("button", { name: "Add server", exact: true }).click()
 
     return editor
   }
 
   const added = await addServer()
+  await added.getByRole("button", { name: "Add header", exact: true }).click()
+  const headerName = added.getByLabel("Header name 1", { exact: true })
+  const headerValue = added.getByLabel("Header value 1", { exact: true })
+  await expect(headerValue).toHaveAttribute("type", "password")
+  await headerName.fill("CF-Access-Client-Secret")
+  await added.getByRole("button", { name: "Add server", exact: true }).click()
+  await expect(added.getByRole("alert")).toHaveText("Enter a name and value for every header, or remove the row.")
+  await headerValue.fill("proxy-secret")
+  await headerName.fill("Invalid Name")
+  await expect(added.getByRole("alert")).toHaveText(
+    "Header names can only contain letters, numbers, and HTTP token symbols, without spaces.",
+  )
+  await headerName.fill("CF-Access-Client-Secret")
+  await headerValue.fill("invalid-\u0100")
+  await expect(added.getByRole("alert")).toHaveText(
+    "Header values cannot contain line breaks, control characters, or characters outside Latin-1.",
+  )
+  await headerValue.fill("proxy-secret")
+  await added.getByRole("button", { name: "Add header", exact: true }).click()
+  await added.getByLabel("Header name 2", { exact: true }).fill("cf-access-client-secret")
+  await added.getByLabel("Header value 2", { exact: true }).fill("duplicate")
+  await added.getByRole("button", { name: "Add server", exact: true }).click()
+  await expect(added.getByRole("alert")).toHaveText("Header names must be unique (case-insensitive).")
+  expect(redemptions).toEqual([])
+  await added.getByRole("button", { name: "Remove header 2", exact: true }).click()
+  const redeem = page.waitForRequest(link)
+  const health = page.waitForRequest(`${paired}/api/info`)
+  await added.getByRole("button", { name: "Add server", exact: true }).click()
+  expect((await redeem).headers()["cf-access-client-secret"]).toBe("proxy-secret")
+  expect((await health).headers()).toMatchObject({
+    "cf-access-client-secret": "proxy-secret",
+    authorization: `Basic ${btoa("opencode:session-token")}`,
+  })
   await expect(added).toBeHidden()
   await expect(settings.getByText(paired, { exact: true })).toBeVisible()
+
+  // Reload is intentional: header credentials must survive browser storage, not only the live form.
+  await page.reload()
+
+  const editServer = async () => {
+    await settings
+      .locator('[data-component="settings-server-connection"]')
+      .getByRole("button", { name: "More options", exact: true })
+      .click()
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
+
+    return page.getByRole("dialog", { name: "Edit server", exact: true })
+  }
+
+  const edit = await editServer()
+  await expect(edit.getByLabel("Header name 1", { exact: true })).toHaveValue("CF-Access-Client-Secret")
+  await expect(edit.getByLabel("Header value 1", { exact: true })).toHaveValue("proxy-secret")
+  await expect(edit.getByLabel("Header value 1", { exact: true })).toHaveAttribute("type", "password")
+  // Only the header changes, so the unchanged-server fast path must not discard the edit.
+  await edit.getByLabel("Header value 1", { exact: true }).fill("rotated-secret")
+  await edit.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(edit).toBeHidden()
+
+  const clear = await editServer()
+  await expect(clear.getByLabel("Header value 1", { exact: true })).toHaveValue("rotated-secret")
+
+  const withoutHeader = page.waitForRequest(
+    (request) => request.url() === `${paired}/api/info` && !request.headers()["cf-access-client-secret"],
+  )
+
+  await clear.getByRole("button", { name: "Remove header 1", exact: true }).click()
+  await clear.getByRole("button", { name: "Save", exact: true }).click()
+  expect((await withoutHeader).headers()["cf-access-client-secret"]).toBeUndefined()
+  await expect(clear).toBeHidden()
+  // Removing the final row must also clear the persisted header map.
+  await page.reload()
+  const cleared = await editServer()
+  await expect(cleared.getByLabel("Header name 1", { exact: true })).toHaveCount(0)
+  await cleared.getByRole("button", { name: "Cancel", exact: true }).click()
   await settings.getByRole("button", { name: "Back to settings" }).click()
 
   const spent = await addServer()
+  await spent.getByRole("button", { name: "Add server", exact: true }).click()
   await expect(spent.getByRole("alert")).toHaveText(
     "This pairing link expired or was already used. Run opencode pair to get a new one.",
   )
+})
+
+test("initial sign-in sends saved and new headers with pairing and a password", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const accepted = { password: "session-token" }
+  await mockWorkspace(page, {
+    name: "Header sign-in",
+    provider: NO_PROVIDER,
+    password: () => accepted.password,
+    pairing: { code: "initial-code", token: "session-token" },
+    sessions: [],
+    seed: {
+      tabs: [],
+      storage: {
+        "opencode.global.dat:server": {
+          list: [{ type: "http", http: { url: SERVER, headers: { "CF-Access-Client-Id": "saved-client" } } }],
+        },
+      },
+    },
+  })
+  await page.goto("/")
+  const connect = page.getByRole("main", { name: "Connect to a server", exact: true })
+  await expect(connect.getByLabel("Header name 1", { exact: true })).toHaveValue("CF-Access-Client-Id")
+  await expect(connect.getByLabel("Header value 1", { exact: true })).toHaveValue("saved-client")
+  await connect.getByRole("button", { name: "Add header", exact: true }).click()
+  await connect.getByLabel("Header name 2", { exact: true }).fill("CF-Access-Client-Secret")
+  await connect.getByLabel("Header value 2", { exact: true }).fill("new-secret")
+  const link = `${SERVER}/auth/connect/initial-code`
+  await connect.getByLabel("Pairing link", { exact: true }).fill(link)
+  const redeem = page.waitForRequest(link)
+  await connect.getByRole("button", { name: "Connect", exact: true }).click()
+  expect((await redeem).headers()).toMatchObject({
+    "cf-access-client-id": "saved-client",
+    "cf-access-client-secret": "new-secret",
+  })
+  await expect(connect).toBeHidden()
+  await expect(page.getByRole("textbox", { name: "Search sessions", exact: true })).toBeEditable()
+
+  // Re-signing in preserves both saved headers when the server now requires a different password.
+  accepted.password = "server-password"
+  await page.reload()
+  await expect(connect.getByLabel("Header value 1", { exact: true })).toHaveValue("saved-client")
+  await expect(connect.getByLabel("Header value 2", { exact: true })).toHaveValue("new-secret")
+  await connect.getByRole("button", { name: "Use password", exact: true }).click()
+  await expect(connect.getByLabel("Server address", { exact: true })).toHaveValue(SERVER)
+  await connect.getByLabel("Password", { exact: true }).fill("server-password")
+
+  const health = page.waitForRequest(
+    (request) =>
+      request.url() === `${SERVER}/api/info` && request.headers()["cf-access-client-secret"] === "new-secret",
+  )
+
+  await connect.getByRole("button", { name: "Connect", exact: true }).click()
+  expect((await health).headers()).toMatchObject({
+    "cf-access-client-id": "saved-client",
+    "cf-access-client-secret": "new-secret",
+    authorization: `Basic ${btoa("opencode:server-password")}`,
+  })
+  await expect(connect).toBeHidden()
+  await expect(page.getByRole("textbox", { name: "Search sessions", exact: true })).toBeEditable()
 })
 
 test("a pairing code with several addresses keeps the first one that works with its token", async ({ page }) => {

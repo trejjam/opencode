@@ -367,6 +367,22 @@ export const dict = {
   "server.connect.link.prompt": "Have a pairing link?",
   "server.connect.link.use": "Use pairing link",
   "server.connect.button": "Connect",
+  "server.connect.headers.title": "Custom headers",
+  "server.connect.headers.add": "Add header",
+  "server.connect.headers.name": "Name",
+  "server.connect.headers.value": "Value",
+  "server.connect.headers.nameLabel": "Header name {{number}}",
+  "server.connect.headers.valueLabel": "Header value {{number}}",
+  "server.connect.headers.namePlaceholder": "CF-Access-Client-Id",
+  "server.connect.headers.remove": "Remove header {{number}}",
+  "server.connect.headers.hint":
+    "Sent with HTTP requests and events, not browser terminal WebSocket handshakes. Saved in this browser with your server credentials. Cross-origin servers or proxies must allow these headers.",
+  "server.connect.headers.incomplete": "Enter a name and value for every header, or remove the row.",
+  "server.connect.headers.invalidName":
+    "Header names can only contain letters, numbers, and HTTP token symbols, without spaces.",
+  "server.connect.headers.invalidValue":
+    "Header values cannot contain line breaks, control characters, or characters outside Latin-1.",
+  "server.connect.headers.duplicate": "Header names must be unique (case-insensitive).",
   "server.connect.address.invalid": "Enter a valid HTTP or HTTPS server address.",
   "server.connect.failed": "Could not connect. Check the server address and password, then try again.",
   "server.connect.pair.link": "Run this command on the server's computer to get a pairing link and QR code.",

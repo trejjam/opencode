@@ -1960,6 +1960,21 @@
   padding: 24px;
 }
 
+[data-component="dialog-v2"] [data-slot="dialog-container"].settings-server-dialog-container {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+
+  [data-slot="dialog-content"].settings-server-dialog {
+    max-height: calc(100dvh - 32px);
+    overflow: hidden;
+
+    [data-slot="dialog-body"] {
+      min-height: 0;
+      overflow-y: auto;
+    }
+  }
+}
+
 .settings-server-dialog-label {
   font-size: 13px;
   font-weight: 530;

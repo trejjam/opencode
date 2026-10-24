@@ -80,6 +80,16 @@
     width: auto;
   }
 
+  .server-header-heading button {
+    min-height: 32px;
+    width: auto;
+  }
+
+  .server-header-row button {
+    width: 44px;
+    height: 44px;
+  }
+
   .server-connect-hint {
     font-size: 12px;
     line-height: var(--line-height-compact);

@@ -5,6 +5,7 @@ export type ServerFormValues = {
   url: string
   name: string
   password: string
+  headers?: ServerConnection.HttpBase["headers"]
 }
 
 export function createServerHealthPreview(
@@ -32,6 +33,8 @@ export function createServerHealthPreview(
     const http: ServerConnection.HttpBase = { url: normalized }
 
     if (values.password) http.password = values.password
+
+    if (values.headers) http.headers = values.headers
     const result = await check(http)
 
     if (current !== generation) return

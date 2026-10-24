@@ -15,7 +15,11 @@ function deferred<T>() {
 const values = (url: string): ServerFormValues => ({ url, name: "", password: "" })
 
 describe("createServerHealthPreview", () => {
-  test.each(["", "secret"])("previews a server with only its password (%s)", async (password) => {
+  test.each([
+    { password: "" },
+    { password: "secret" },
+    { password: "secret", headers: { "CF-Access-Client-Secret": "proxy-secret" } },
+  ])("previews a server with its credentials (%j)", async (credentials) => {
     const requests: ServerConnection.HttpBase[] = []
 
     const preview = createServerHealthPreview(async (http) => {
@@ -24,8 +28,14 @@ describe("createServerHealthPreview", () => {
       return { healthy: true }
     })
 
-    await preview.preview({ ...values("server.example.com"), password }, () => {})
-    expect(requests).toEqual([{ url: "http://server.example.com", ...(password ? { password } : {}) }])
+    await preview.preview({ ...values("server.example.com"), ...credentials }, () => {})
+
+    const expected: ServerConnection.HttpBase = { url: "http://server.example.com" }
+
+    if (credentials.password) expected.password = credentials.password
+
+    if (credentials.headers) expected.headers = credentials.headers
+    expect(requests).toEqual([expected])
   })
 
   test("ignores an older response that resolves after the latest response", async () => {

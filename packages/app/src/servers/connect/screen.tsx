@@ -13,6 +13,7 @@ import { useRedeemPairing } from "./redeem"
 import { isMixedContent } from "./browser"
 import { cameraHint, createCameraAvailability } from "./camera"
 import { ConnectMethodSwitch, type ConnectMethod } from "./method"
+import { createServerHeaderEditor, ServerHeaderEditor } from "./headers"
 import "./screen.css"
 
 const PairingScanner = lazy(() => import("./scanner").then((module) => ({ default: module.PairingScanner })))
@@ -22,7 +23,6 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
   const platform = usePlatform()
   const servers = useServers()
   const check = useCheckServerHealth()
-  const redeem = useRedeemPairing()
   const camera = createCameraAvailability()
 
   const [state, setState] = createStore<{
@@ -41,11 +41,18 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
     scanning: false,
   })
 
+  const headers = createServerHeaderEditor({
+    headers: servers.list.find((server) => server.type === "http" && server.http.url === props.url)?.http.headers,
+    onChange: () => setState("error", ""),
+  })
+
+  const redeem = useRedeemPairing(() => headers.result().headers)
+
   // A pairing token works on every address of its server. Signing in again to the server that signed out keeps its
   // address (e.g. localhost) even when the link names another one (e.g. 127.0.0.1 from opencode pair).
   const target = async (pairing: Pairing) => {
     if (!props.url || props.url === pairing.url) return pairing
-    const http = { url: props.url, password: pairing.password }
+    const http = { ...pairing, url: props.url }
 
     return (await check(http)).healthy ? http : pairing
   }
@@ -100,7 +107,7 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
 
       if (!url) return void setState("error", language.t("server.connect.address.invalid"))
 
-      await connect({ url, password: state.password || undefined })
+      await connect({ url, password: state.password || undefined, headers: headers.result().headers })
     },
     onError: () => setState("error", connectionError(state.method === "link" ? state.link : state.url)),
   }))
@@ -108,6 +115,8 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
   const submit = () => {
     if (request.isPending) return
     setState("error", "")
+
+    if (!headers.validate()) return
     request.mutate()
   }
 
@@ -209,6 +218,7 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
                 </p>
               </div>
             </Show>
+            <ServerHeaderEditor editor={headers} disabled={request.isPending} />
             <Show when={state.error}>
               <p id="server-connect-error" class="server-connect-error" role="alert">
                 {state.error}
@@ -232,7 +242,10 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
                 variant="neutral"
                 size="large"
                 disabled={request.isPending || !camera.available.latest}
-                onClick={() => setState("scanning", true)}
+                onClick={() => {
+                  if (!headers.validate()) return
+                  setState("scanning", true)
+                }}
               >
                 {language.t("server.connect.scan")}
               </Button>
