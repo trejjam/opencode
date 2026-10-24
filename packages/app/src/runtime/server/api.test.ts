@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import type { ServerConnection } from "@/runtime/server/registry"
 import { authFromToken, authTokenFromCredentials, serverConnectionIdentity, serverHeaders } from "./api"
 
 test.each([
@@ -16,7 +17,10 @@ test("authTokenFromCredentials ignores usernames in legacy saved credentials", (
   expect(authTokenFromCredentials(credentials)).toBe(btoa("opencode:secret"))
 })
 
-test.each([
+const headerCases: Array<{
+  http: Omit<ServerConnection.HttpBase, "url">
+  expected: ReturnType<typeof serverHeaders>
+}> = [
   { http: {}, expected: undefined },
   { http: { headers: {} }, expected: undefined },
   { http: { password: "secret" }, expected: { authorization: `Basic ${btoa("opencode:secret")}` } },
@@ -32,7 +36,9 @@ test.each([
     http: { password: "secret", headers: { Authorization: "Bearer first", aUtHoRiZaTiOn: "Bearer custom" } },
     expected: { authorization: "Bearer custom" },
   },
-])("merges effective headers with case-insensitive custom overrides (%p)", ({ http, expected }) => {
+]
+
+test.each(headerCases)("merges effective headers with case-insensitive custom overrides (%p)", ({ http, expected }) => {
   expect(serverHeaders({ url: "https://opencode.example", ...http })).toEqual(expected)
 })
 

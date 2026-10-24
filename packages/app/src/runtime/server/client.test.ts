@@ -98,7 +98,7 @@ test("rotates HTTP, SSE and PTY ticket headers together, including header-only e
     })
 
     if (new URL(request.url).pathname === "/api/event")
-      return new Response('data: {"type":"server.connected","data":{}}\n\n', {
+      return new Response('data: {"id":"evt_connected","type":"server.connected","data":{}}\n\n', {
         headers: { "content-type": "text/event-stream" },
       })
 
@@ -162,7 +162,7 @@ test("rotates HTTP, SSE and PTY ticket headers together, including header-only e
   await transport.api.server.info()
   const events: OpenCodeEvent[] = []
   for await (const event of transport.api.event.subscribe()) events.push(event)
-  expect(events).toEqual([{ type: "server.connected", data: {} }])
+  expect(events).toEqual([{ id: "evt_connected", type: "server.connected", data: {} }])
   await expect(transport.pty.connect({ ptyID: "pty_1" })).rejects.toThrow()
 
   expect(requests).toEqual(
